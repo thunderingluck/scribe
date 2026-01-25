@@ -1,9 +1,14 @@
-# Python environments
-.venv/
-
-# Environment variables / secrets
+# env / secrets
 .env
 
-# Python cache
+.venv/
 __pycache__/
 *.pyc
+
+# outputs
+outputs/
+
+# Private datasets
+data/**
+!data/.gitkeep
+!data/**/.gitkeep
