@@ -12,3 +12,6 @@ outputs/
 data/**
 !data/.gitkeep
 !data/**/.gitkeep
+
+#models
+hf_models/
