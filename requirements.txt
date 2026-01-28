@@ -1,3 +1,4 @@
+# ML / inference
 transformers>=4.40
 datasets>=2.18
 peft>=0.11
@@ -5,3 +6,8 @@ accelerate>=0.29
 bitsandbytes>=0.43
 sentencepiece>=0.2
 safetensors>=0.4
+
+# API server
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
