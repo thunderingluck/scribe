@@ -63,15 +63,6 @@ def read_prompt(args: argparse.Namespace) -> str:
     return sys.stdin.read()
 
 
-def pick_compute_dtype(args: argparse.Namespace) -> torch.dtype:
-    """Choose a reasonable dtype. On CPU, use fp32. On CUDA, prefer bf16 when available."""
-    if args.cpu or not torch.cuda.is_available():
-        return torch.float32
-    if args.bf16 and torch.cuda.is_bf16_supported():
-        return torch.bfloat16
-    return torch.float16
-
-
 def load_tokenizer(tokenizer_path: str, local_only: bool) -> Any:
     tok = AutoTokenizer.from_pretrained(
         tokenizer_path,
@@ -86,18 +77,20 @@ def load_tokenizer(tokenizer_path: str, local_only: bool) -> Any:
 def load_base_model(
     base_model: str,
     *,
-    device_map: str,
+    device_map: str | None,
     compute_dtype: torch.dtype,
     use_4bit: bool,
     local_only: bool,
 ) -> Any:
-    # CPU: avoid unnecessary overhead and reduce peak RAM during load
-    common_kwargs = dict(
-        device_map=device_map,
+    common_kwargs: Dict[str, Any] = dict(
         use_safetensors=True,
         local_files_only=local_only,
-        low_cpu_mem_usage=True,
     )
+
+    # Only use accelerate/device_map path when device_map is not None
+    if device_map is not None:
+        common_kwargs["device_map"] = device_map
+        common_kwargs["low_cpu_mem_usage"] = True
 
     if use_4bit:
         # 4-bit is CUDA-only in practice; keep it off for CPU
@@ -214,26 +207,43 @@ def main() -> None:
     # Determinism
     torch.manual_seed(args.seed)
 
+    # Whether HF may download missing files
     local_only = not args.allow_download
 
     # Device/dtype decisions
-    if args.cpu:
-        device_map = "cpu"
+    has_cuda = torch.cuda.is_available()
+
+    if args.cpu or not has_cuda:
+        # IMPORTANT: avoid Accelerate/meta initialization on CPU
+        device_map: str | None = None
         use_4bit = False
+        compute_dtype = torch.float32
     else:
         device_map = "auto"
-        use_4bit = (not args.no_4bit) and torch.cuda.is_available()
-
-    compute_dtype = pick_compute_dtype(args)
+        use_4bit = (not args.no_4bit)
+        compute_dtype = (
+            torch.bfloat16
+            if args.bf16 and torch.cuda.is_bf16_supported()
+            else torch.float16
+        )
 
     # Helpful diagnostics
-    print(f"[info] cuda_available={torch.cuda.is_available()} cpu_forced={args.cpu} use_4bit={use_4bit}", file=sys.stderr)
-    if torch.cuda.is_available():
+    print(
+        f"[info] cuda_available={has_cuda} cpu_forced={args.cpu} use_4bit={use_4bit}",
+        file=sys.stderr,
+    )
+    if has_cuda:
         try:
-            print(f"[info] gpu={torch.cuda.get_device_name(0)} bf16_supported={torch.cuda.is_bf16_supported()}", file=sys.stderr)
+            print(
+                f"[info] gpu={torch.cuda.get_device_name(0)} bf16_supported={torch.cuda.is_bf16_supported()}",
+                file=sys.stderr,
+            )
         except Exception:
             pass
-    print(f"[info] dtype={compute_dtype} device_map={device_map} local_files_only={local_only}", file=sys.stderr)
+    print(
+        f"[info] dtype={compute_dtype} device_map={device_map} local_files_only={local_only}",
+        file=sys.stderr,
+    )
     print(f"[info] base_model={args.base_model}", file=sys.stderr)
     print(f"[info] adapter_path={adapter_path}", file=sys.stderr)
     print(f"[info] tokenizer_path={tokenizer_path}", file=sys.stderr)
