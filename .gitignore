@@ -7,14 +7,20 @@ __pycache__/
 
 # outputs
 outputs/**
+!outputs/
+!outputs/.gitkeep
+!outputs/README.md
+
+# models
+hf_models/**
+!hf_models/
+!hf_models/.gitkeep
+!hf_models/README.md
 
 # Private datasets
 data/**
 !data/.gitkeep
 !data/**/.gitkeep
-
-#models
-hf_models/**
 
 #  allow placeholder files
 !hf_models/.gitkeep
