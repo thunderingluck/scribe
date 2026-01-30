@@ -6,7 +6,7 @@ __pycache__/
 *.pyc
 
 # outputs
-outputs/
+outputs/**
 
 # Private datasets
 data/**
@@ -14,4 +14,11 @@ data/**
 !data/**/.gitkeep
 
 #models
-hf_models/
+hf_models/**
+
+#  allow placeholder files
+!hf_models/.gitkeep
+!outputs/.gitkeep
+!hf_models/README.md
+!outputs/README.md
+
