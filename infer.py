@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """
-infer.py — Run inference with a LoRA adapter for essay-style generation.
+infer.py — Run inference with a LoRA adapter for essay-style generation (Colab-matched).
+
+Training/inference prompt format (matches the attached .ipynb):
+  Prompt: <prompt>
+
+  Essay:
+  <model continues here>
 
 Usage:
   python infer.py \
@@ -20,7 +26,12 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
+# End-of-essay marker
+END_MARKER = "<END_ESSAY>"
 
+# ----------------------------
+# Path helpers
+# ----------------------------
 def resolve_adapter_path(path: Path) -> Path:
     """Accept either an adapter dir, or a run root that contains ./adapter/."""
     if (path / "adapter_config.json").exists():
@@ -37,22 +48,12 @@ def resolve_tokenizer_path(run_root: Path, base_model: str) -> str:
     return base_model
 
 
-def build_prompt(prompt: str, tokenizer: Any, system_prompt: str) -> str:
-    """Build a chat prompt using the tokenizer's chat template if available."""
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": prompt.strip()},
-    ]
-    if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
-        return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-
-    # Fallback: a simple instruction format (may be suboptimal for Mistral-Instruct,
-    # but keeps the script robust if chat templates are missing).
-    return (
-        f"### System:\n{system_prompt.strip()}\n\n"
-        f"### User:\n{prompt.strip()}\n\n"
-        f"### Assistant:\n"
-    )
+# ----------------------------
+# Prompt formatting (Colab-matched)
+# ----------------------------
+def build_prompt(user_prompt: str) -> str:
+    # Exact formatting matters: match whatever you trained on in train.py / Colab
+    return f"Prompt: {user_prompt.strip()}\n\nEssay:\n"
 
 
 def read_prompt(args: argparse.Namespace) -> str:
@@ -63,6 +64,9 @@ def read_prompt(args: argparse.Namespace) -> str:
     return sys.stdin.read()
 
 
+# ----------------------------
+# Loading
+# ----------------------------
 def load_tokenizer(tokenizer_path: str, local_only: bool) -> Any:
     tok = AutoTokenizer.from_pretrained(
         tokenizer_path,
@@ -114,19 +118,22 @@ def load_base_model(
     )
 
 
+# ----------------------------
+# Generation
+# ----------------------------
 def run_once(
     *,
     model: Any,
     tokenizer: Any,
     user_prompt: str,
-    system_prompt: str,
     max_new_tokens: int,
     temperature: float,
     top_p: float,
     top_k: int,
     repetition_penalty: float,
 ) -> str:
-    full_prompt = build_prompt(user_prompt, tokenizer, system_prompt)
+    full_prompt = build_prompt(user_prompt)
+
     inputs = tokenizer(full_prompt, return_tensors="pt")
     inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
@@ -145,13 +152,27 @@ def run_once(
     with torch.inference_mode():
         output_ids = model.generate(**inputs, **gen_kwargs)
 
-    text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+    decoded = tokenizer.decode(output_ids[0], skip_special_tokens=True)
 
-    # If using chat templates, decoding often returns the full transcript.
-    # For non-chat fallback format, strip the prompt prefix to return just assistant output.
-    if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
-        return text.strip()
-    return text[len(full_prompt) :].lstrip()
+    # Colab-style: extract only the continuation after the prompt prefix
+    if decoded.startswith(full_prompt):
+        text = decoded[len(full_prompt):]
+    else:
+        # Fallback: if tokenization/decoding quirks remove or alter prefix,
+        # do a best-effort split on the marker.
+        marker = "\n\nEssay:\n"
+        if marker in decoded:
+            text = decoded.split(marker, 1)[1]
+        else:
+            text = decoded
+
+    text = text.lstrip()
+
+    # <<< ADD THIS: stop at END_MARKER >>>
+    if END_MARKER in text:
+        text = text.split(END_MARKER, 1)[0]
+
+    return text.strip()
 
 
 def main() -> None:
@@ -166,16 +187,6 @@ def main() -> None:
     p.add_argument("--prompt", type=str, default="", help="User prompt (or provide via --prompt_file / stdin)")
     p.add_argument("--prompt_file", type=str, default="")
     p.add_argument("--interactive", action="store_true", help="Prompt in a loop for multiple requests")
-
-    p.add_argument(
-        "--system_prompt",
-        type=str,
-        default=(
-            "You are an essay-writing assistant. Write high-quality essays in the user's style. "
-            "Match the user's tone, rhythm, and rhetorical habits. "
-            "Do not copy exact sentences from training essays; emulate style instead."
-        ),
-    )
 
     p.add_argument("--max_new_tokens", type=int, default=800)
     p.add_argument("--temperature", type=float, default=0.7)
@@ -214,18 +225,13 @@ def main() -> None:
     has_cuda = torch.cuda.is_available()
 
     if args.cpu or not has_cuda:
-        # IMPORTANT: avoid Accelerate/meta initialization on CPU
         device_map: str | None = None
         use_4bit = False
         compute_dtype = torch.float32
     else:
         device_map = "auto"
         use_4bit = (not args.no_4bit)
-        compute_dtype = (
-            torch.bfloat16
-            if args.bf16 and torch.cuda.is_bf16_supported()
-            else torch.float16
-        )
+        compute_dtype = torch.bfloat16 if args.bf16 and torch.cuda.is_bf16_supported() else torch.float16
 
     # Helpful diagnostics
     print(
@@ -248,7 +254,7 @@ def main() -> None:
     print(f"[info] adapter_path={adapter_path}", file=sys.stderr)
     print(f"[info] tokenizer_path={tokenizer_path}", file=sys.stderr)
 
-    # Load tokenizer first (fast; helps fail early if cache/download issues)
+    # Load tokenizer
     tokenizer = load_tokenizer(tokenizer_path, local_only=local_only)
 
     # Load base model
@@ -276,7 +282,6 @@ def main() -> None:
                         model=model,
                         tokenizer=tokenizer,
                         user_prompt=user_prompt,
-                        system_prompt=args.system_prompt,
                         max_new_tokens=args.max_new_tokens,
                         temperature=args.temperature,
                         top_p=args.top_p,
@@ -292,7 +297,6 @@ def main() -> None:
                 model=model,
                 tokenizer=tokenizer,
                 user_prompt=prompt,
-                system_prompt=args.system_prompt,
                 max_new_tokens=args.max_new_tokens,
                 temperature=args.temperature,
                 top_p=args.top_p,
