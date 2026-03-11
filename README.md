@@ -1,6 +1,6 @@
 ## Scribe
 
-Fine-tune a LoRA adapter to imitate a user's essay-writing style and run inference locally.
+Scribe: a personalized LoRA-fine-tuned writing assistant. Preserving your voice
 
 NOTE: See `scribe/scribe` for MVP and `scribe/scribe/README.md`
 
