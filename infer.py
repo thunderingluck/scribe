@@ -20,7 +20,9 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict  
+import time
+
 
 import torch
 from peft import PeftModel
@@ -81,23 +83,32 @@ def load_tokenizer(tokenizer_path: str, local_only: bool) -> Any:
 def load_base_model(
     base_model: str,
     *,
-    device_map: str | None,
+    device_map: dict | str | None,
     compute_dtype: torch.dtype,
+    use_8bit: bool,
     use_4bit: bool,
     local_only: bool,
 ) -> Any:
     common_kwargs: Dict[str, Any] = dict(
         use_safetensors=True,
         local_files_only=local_only,
+        attn_implementation="flash_attention_2",
     )
 
-    # Only use accelerate/device_map path when device_map is not None
     if device_map is not None:
         common_kwargs["device_map"] = device_map
         common_kwargs["low_cpu_mem_usage"] = True
 
+    if use_8bit:
+        bnb_cfg = BitsAndBytesConfig(load_in_8bit=True)
+        return AutoModelForCausalLM.from_pretrained(
+            base_model,
+            quantization_config=bnb_cfg,
+            dtype=compute_dtype,
+            **common_kwargs,
+        )
+
     if use_4bit:
-        # 4-bit is CUDA-only in practice; keep it off for CPU
         bnb_cfg = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_use_double_quant=True,
@@ -107,16 +118,15 @@ def load_base_model(
         return AutoModelForCausalLM.from_pretrained(
             base_model,
             quantization_config=bnb_cfg,
-            torch_dtype=compute_dtype,
+            dtype=compute_dtype,
             **common_kwargs,
         )
 
     return AutoModelForCausalLM.from_pretrained(
         base_model,
-        torch_dtype=compute_dtype,
+        dtype=compute_dtype,
         **common_kwargs,
     )
-
 
 # ----------------------------
 # Generation
@@ -134,8 +144,8 @@ def run_once(
 ) -> str:
     full_prompt = build_prompt(user_prompt)
 
-    inputs = tokenizer(full_prompt, return_tensors="pt")
-    inputs = {k: v.to(model.device) for k, v in inputs.items()}
+    device = next(model.parameters()).device
+    inputs = tokenizer(full_prompt, return_tensors="pt").to(device)
 
     gen_kwargs: Dict[str, Any] = {
         "max_new_tokens": max_new_tokens,
@@ -149,8 +159,15 @@ def run_once(
     if top_k > 0:
         gen_kwargs["top_k"] = top_k
 
+    t0 = time.perf_counter()
     with torch.inference_mode():
         output_ids = model.generate(**inputs, **gen_kwargs)
+    t1 = time.perf_counter()
+    in_len = inputs["input_ids"].shape[1]
+    out_len = output_ids.shape[1]
+    new_tokens = out_len - in_len
+    print(f"[perf] prompt_tokens={in_len} new_tokens={new_tokens} time={t1-t0:.2f}s tok/s={new_tokens/(t1-t0+1e-9):.1f}",
+      file=sys.stderr)
 
     decoded = tokenizer.decode(output_ids[0], skip_special_tokens=True)
 
@@ -176,7 +193,11 @@ def run_once(
 
 
 def main() -> None:
+    # Add at start of main(), before model loading
+    if torch.cuda.is_available():
+        torch.set_float32_matmul_precision('high')  # Use TF32 on Ampere+ GPUs
     p = argparse.ArgumentParser()
+    p.add_argument("--load_8bit", action="store_true", help="Load model in 8-bit (bitsandbytes)")
     p.add_argument("--base_model", type=str, required=True, help="HF model name or local path")
     p.add_argument(
         "--adapter_path",
@@ -226,16 +247,18 @@ def main() -> None:
 
     if args.cpu or not has_cuda:
         device_map: str | None = None
+        use_8bit = False
         use_4bit = False
         compute_dtype = torch.float32
     else:
-        device_map = "auto"
-        use_4bit = (not args.no_4bit)
-        compute_dtype = torch.bfloat16 if args.bf16 and torch.cuda.is_bf16_supported() else torch.float16
+        device_map = {"": 0}
 
-    # Helpful diagnostics
+        use_8bit = bool(args.load_8bit)
+        use_4bit = (not args.no_4bit) and (not use_8bit)  # 8-bit overrides 4-bit
+
+        compute_dtype = torch.bfloat16 if args.bf16 and torch.cuda.is_bf16_supported() else torch.float16    # Helpful diagnostics
     print(
-        f"[info] cuda_available={has_cuda} cpu_forced={args.cpu} use_4bit={use_4bit}",
+        f"[info] cuda_available={has_cuda} cpu_forced={args.cpu} use_8bit={use_8bit} use_4bit={use_4bit}",
         file=sys.stderr,
     )
     if has_cuda:
@@ -262,13 +285,20 @@ def main() -> None:
         args.base_model,
         device_map=device_map,
         compute_dtype=compute_dtype,
+        use_8bit=use_8bit,
         use_4bit=use_4bit,
         local_only=local_only,
-    )
-
+)
     # Attach LoRA adapter
     model = PeftModel.from_pretrained(base, str(adapter_path), is_trainable=False)
     model.eval()
+
+    # # After model.eval()
+    # if hasattr(torch, 'compile') and not args.cpu:
+    #     print("[info] Compiling model with torch.compile...", file=sys.stderr)
+    #     model = torch.compile(model, mode="reduce-overhead")
+    #     # Do a warmup inference to trigger compilation
+    #     _ = model.generate(**tokenizer("warmup", return_tensors="pt").to(model.device), max_new_tokens=1)
 
     if args.interactive:
         print("Interactive mode. Type a prompt and press Enter. Ctrl+C to exit.")

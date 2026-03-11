@@ -6,6 +6,7 @@ accelerate>=0.29
 bitsandbytes>=0.43
 sentencepiece>=0.2
 safetensors>=0.4
+flash-attn>=2.8
 
 # API server
 fastapi>=0.110
