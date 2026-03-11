@@ -143,6 +143,30 @@ At generation time, `retrieval.py` selects up to `top_k_context` (default 3) ess
 
 This is intentionally simple — the module's interface is isolated so it can be replaced with embedding-based retrieval (FAISS, pgvector, etc.) without touching the API layer.
 
+More details:
+The flow in retrieval.py is:
+
+  1. Load all raw {"prompt", "essay"} records from the file
+  2. For each essay, compute a word-intersection (Jaccard-like) score between the new prompt's words and the combined words of that essay's prompt +   
+  body
+  3. Return the first ~300 characters of the top k essays by score
+
+  The scoring function in retrieval.py:
+
+  def _score(query_tokens: set[str], essay: dict) -> float:
+      prompt_tokens = _tokenize(essay.get("prompt", ""))
+      essay_tokens  = _tokenize(essay.get("essay", ""))
+      combined = prompt_tokens | essay_tokens
+      return len(query_tokens & combined) / len(query_tokens | combined)
+
+  So if you generate an essay on "Why I want to work in AI", it scores every stored essay by how many words overlap with that phrase, then injects the 
+  top 3 excerpts into the system prompt as context.
+
+  Limitations of this approach:
+  - It's purely lexical — no semantic understanding (e.g. "machine learning" won't match "AI")
+  - Scores against the full essay body, not just the topic, so a long essay can dominate just by having many overlapping common words
+  - Truncates at 300 chars, which may cut off mid-sentence
+
 ---
 
 ## Extension Points
