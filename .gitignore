@@ -1,6 +1,11 @@
 # env / secrets
 .env
 
+# Scribe runtime state
+scribe/backend/state/state.json
+scribe/backend/state/raw_essays.jsonl
+scribe/backend/state/training_data.jsonl
+
 .venv/
 __pycache__/
 *.pyc

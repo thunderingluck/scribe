@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scribe</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 760px;
+      margin: 40px auto;
+      padding: 0 20px;
+      background: #f9f9f7;
+      color: #1a1a1a;
+    }
+    h1 { font-size: 1.8rem; margin-bottom: 4px; }
+    h2 { font-size: 1.1rem; margin: 0 0 12px; color: #555; font-weight: 500; }
+    .section {
+      background: #fff;
+      border: 1px solid #e0e0da;
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin-bottom: 20px;
+    }
+    .section h3 { margin: 0 0 14px; font-size: 1rem; letter-spacing: 0.02em; text-transform: uppercase; color: #888; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    button {
+      background: #1a1a1a;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      padding: 8px 16px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    button:disabled { background: #aaa; cursor: not-allowed; }
+    button.secondary {
+      background: #fff;
+      color: #1a1a1a;
+      border: 1px solid #ccc;
+    }
+    input[type="file"] { font-size: 0.88rem; }
+    textarea, input[type="text"] {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      resize: vertical;
+    }
+    .status {
+      margin-top: 10px;
+      padding: 8px 12px;
+      border-radius: 5px;
+      font-size: 0.875rem;
+      display: none;
+    }
+    .status.info  { background: #eef4ff; color: #1e40af; display: block; }
+    .status.ok    { background: #f0fdf4; color: #15803d; display: block; }
+    .status.error { background: #fef2f2; color: #b91c1c; display: block; }
+    .status.warn  { background: #fffbeb; color: #92400e; display: block; }
+    #essay-output {
+      white-space: pre-wrap;
+      line-height: 1.65;
+      font-size: 0.95rem;
+      min-height: 60px;
+      padding: 14px;
+      background: #fafaf8;
+      border: 1px solid #e8e8e0;
+      border-radius: 6px;
+      margin-top: 10px;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+    .badge-pending  { background: #fef9c3; color: #713f12; }
+    .badge-running  { background: #dbeafe; color: #1e3a8a; }
+    .badge-succeeded{ background: #dcfce7; color: #14532d; }
+    .badge-failed   { background: #fee2e2; color: #7f1d1d; }
+    #poll-btn { display: none; }
+    label { font-size: 0.9rem; font-weight: 500; display: block; margin-bottom: 6px; }
+    .context-note { font-size: 0.8rem; color: #888; margin-top: 4px; }
+    details { margin-top: 10px; font-size: 0.85rem; color: #555; }
+    summary { cursor: pointer; font-weight: 500; }
+    details pre { background: #f4f4f1; padding: 10px; border-radius: 5px; overflow: auto; font-size: 0.82rem; }
+  </style>
+</head>
+<body>
+  <h1>Scribe</h1>
+  <h2>Personalized essay generation via fine-tuning</h2>
+
+  <!-- Step 1: Load data -->
+  <div class="section">
+    <h3>Step 1 — Load essays</h3>
+    <div class="row">
+      <input type="file" id="file-input" accept=".jsonl" />
+      <button id="upload-btn">Upload JSONL</button>
+      <button class="secondary" id="demo-btn">Load demo dataset</button>
+    </div>
+    <div id="load-status" class="status"></div>
+  </div>
+
+  <!-- Step 2: Preprocess -->
+  <div class="section">
+    <h3>Step 2 — Preprocess</h3>
+    <p style="font-size:0.88rem;color:#666;margin:0 0 12px">
+      Converts essays to OpenAI chat fine-tuning format.
+    </p>
+    <button id="preprocess-btn">Preprocess</button>
+    <div id="preprocess-status" class="status"></div>
+  </div>
+
+  <!-- Step 3: Fine-tune -->
+  <div class="section">
+    <h3>Step 3 — Fine-tune</h3>
+    <p style="font-size:0.88rem;color:#666;margin:0 0 12px">
+      Uploads training data to OpenAI and starts a fine-tuning job.<br>
+      Jobs typically take 10–30 minutes.
+    </p>
+    <div class="row">
+      <button id="finetune-btn">Start fine-tuning</button>
+      <button id="poll-btn" class="secondary">Refresh status</button>
+    </div>
+    <div id="finetune-status" class="status"></div>
+  </div>
+
+  <!-- Step 4: Generate -->
+  <div class="section">
+    <h3>Step 4 — Generate essay</h3>
+    <label for="prompt-input">Essay prompt</label>
+    <input type="text" id="prompt-input" placeholder="e.g. Why I want to work in AI" />
+    <div class="context-note">Uses keyword-matched excerpts from your essays as context.</div>
+    <br>
+    <button id="generate-btn">Generate</button>
+    <div id="generate-status" class="status"></div>
+    <div id="essay-output" style="display:none"></div>
+    <details id="context-details" style="display:none">
+      <summary>Context excerpts used</summary>
+      <pre id="context-pre"></pre>
+    </details>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
