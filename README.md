@@ -2,6 +2,8 @@
 
 Fine-tune a LoRA adapter to imitate a user's essay-writing style and run inference locally.
 
+NOTE: See `scribe/scribe` for MVP and `scribe/scribe/README.md`
+
 ### Requirements
 - Python 3.10+
 - GPU recommended for training/inference
