@@ -20,8 +20,8 @@ Training data is JSONL with one example per line:
 ```
 
 Default paths:
-- `data/processed/train.jsonl`
-- `data/processed/val.jsonl` (optional)
+- `../data/processed/train.jsonl`
+- `../data/processed/val.jsonl` (optional)
 
 ### Train
 ```bash

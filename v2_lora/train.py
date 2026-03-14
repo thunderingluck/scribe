@@ -144,8 +144,8 @@ def main() -> None:
     p = argparse.ArgumentParser()
 
     p.add_argument("--base_model", type=str, required=True, help="HF model name or local path")
-    p.add_argument("--train_path", type=str, default="data/processed/train.jsonl")
-    p.add_argument("--val_path", type=str, default="data/processed/val.jsonl")
+    p.add_argument("--train_path", type=str, default="../data/processed/train.jsonl")
+    p.add_argument("--val_path", type=str, default="../data/processed/val.jsonl")
 
     p.add_argument("--output_dir", type=str, default="outputs/adapters")
     p.add_argument("--log_dir", type=str, default="outputs/logs")

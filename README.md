@@ -7,7 +7,7 @@ A minimal full-stack prototype that fine-tunes an OpenAI model on a user's essay
 ## Architecture
 
 ```
-scribe/
+scribe/               # MVP subfolder
 ├── backend/          # FastAPI Python server
 │   ├── main.py       # Routes / app entry point
 │   ├── preprocessing.py  # Raw → OpenAI fine-tuning format
@@ -32,7 +32,7 @@ Raw essay data is JSONL with one record per line:
 {"prompt": "Your essay topic or question", "essay": "The full essay text"}
 ```
 
-The demo dataset lives at `../data/processed/essays.jsonl` relative to this directory.
+The demo dataset lives at `data/processed/essays.jsonl` (repo root).
 
 ---
 
@@ -59,7 +59,7 @@ This transformation is intentionally isolated in `preprocessing.py` so it can be
 ### 1. Clone and enter the project
 
 ```bash
-cd scribe   # this directory
+cd scribe
 ```
 
 ### 2. Configure environment
